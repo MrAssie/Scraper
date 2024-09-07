@@ -1,17 +1,18 @@
+
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.webdriver.common.keys import Keys
+import json
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
 from dotenv import load_dotenv
 import os
 from bs4 import BeautifulSoup
-from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from selenium.webdriver.common.keys import Keys
-import json
+from selenium.webdriver.chromium.remote_connection import ChromiumRemoteConnection
+from selenium.common.exceptions import TimeoutException, WebDriverException
+
+from selenium.webdriver import Remote, ChromeOptions
 
 load_dotenv()
 
@@ -42,53 +43,85 @@ def handle_cookies(driver):
 
 
 def scraper(url, search_term):
-    chrome_options = Options()
+    SBR_WEBDRIVER = os.getenv('SBR_WEBDRIVER')
+    print('Connecting to Scraping Browser...')
+    sbr_connection = ChromiumRemoteConnection(SBR_WEBDRIVER, 'goog', 'chrome')
 
-    proxy_host = os.getenv('PROXY_HOST')
-    proxy_port = os.getenv('PROXY_PORT')
-    proxy_user = os.getenv('PROXY_USER')
-    proxy_pass = os.getenv('PROXY_PASS')
-
-    chrome_options.add_argument(f'--proxy-server={f"http://{proxy_user}:{proxy_pass}@{proxy_host}:{proxy_port}"}')
-
-    # Uncomment de volgende regel als u in headless modus wilt draaien
-    chrome_options.add_argument("--headless")
-
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=chrome_options)
+    chrome_options = ChromeOptions()
+    # Voeg hier eventuele extra opties toe die u nodig heeft
 
     try:
-        driver.get(url)
+        with Remote(sbr_connection, options=chrome_options) as driver:
+            print('Connected! Navigating...')
 
-        # Handel cookies af
-        handle_cookies(driver)
+            driver.get(url)
+            print(f"Navigated to: {driver.current_url}")
 
-        # Wacht tot het zoekveld aanwezig is
-        search_box = WebDriverWait(driver, 2).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder='Zoek in kvk.nl']"))
-        )
+            # Handel cookies af
+            handle_cookies(driver)
+            print("Cookies handled")
 
-        # Wis eventuele bestaande tekst in het zoekveld
-        search_box.clear()
+            # Wacht tot het zoekveld aanwezig is
+            search_box = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder='Zoek in kvk.nl']"))
+            )
+            print("Search box found")
 
-        # Vul de zoekopdracht in
-        search_box.send_keys(search_term)
+            # Wis eventuele bestaande tekst in het zoekveld
+            search_box.clear()
 
-        # Druk op Enter om de zoekopdracht uit te voeren
-        search_box.send_keys(Keys.RETURN)
+            # Vul de zoekopdracht in
+            search_box.send_keys(search_term)
+            print(f"Entered search term: {search_term}")
 
-        # Wacht even om zeker te zijn dat alles is geladen
-        time.sleep(1)
+            # Zoek de zoekknop
+            try:
+                search_button = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR,
+                                                "button[class*='Button-module_generic-button'][class*='Button-module_primary']"))
+                )
+                print("Search button found")
+                driver.execute_script("arguments[0].click();", search_button)
+                print("Clicked search button via JavaScript")
+            except TimeoutException:
+                print("Search button not found or not clickable, trying alternative methods")
 
-        html = driver.page_source
-        return html
+                # Methode 1: Druk op Enter
+                search_box.send_keys(Keys.RETURN)
+                print("Pressed Enter key")
 
+            # Wacht tot de URL verandert of er zoekresultaten verschijnen
+            start_time = time.time()
+            while time.time() - start_time < 10:  # Wacht maximaal 10 seconden
+                if driver.current_url != url:
+                    print("URL changed")
+                    break
+                try:
+                    driver.find_element(By.CSS_SELECTOR, "[data-ui-test-class='spa-global-search']")
+                    print("Search results container found")
+                    break
+                except NoSuchElementException:
+                    time.sleep(0.5)
+            else:
+                print("Timeout waiting for search results or URL change")
+
+
+            # Wacht even om zeker te zijn dat alles is geladen
+            time.sleep(2)
+
+            html = driver.page_source
+            print(html)
+            print(f"HTML retrieved, length: {len(html)}")
+            return html
+
+    except TimeoutException:
+        print("Timeout while waiting for element")
+    except WebDriverException as e:
+        print(f"WebDriver error: {e}")
     except Exception as e:
-        print(f"Er is een fout opgetreden: {str(e)}")
-        return None
+        print(f"An unexpected error occurred: {e}")
 
-    finally:
-        driver.quit()
+    return None
 
 
 def extract_body_content(html):

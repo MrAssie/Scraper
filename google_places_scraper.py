@@ -5,14 +5,11 @@ import time
 from dotenv import load_dotenv
 import os
 from bs4 import BeautifulSoup
-from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.chromium.remote_connection import ChromiumRemoteConnection
+from selenium.common.exceptions import TimeoutException, WebDriverException
 import re
-
+from selenium.webdriver import Remote, ChromeOptions
 load_dotenv()
 
 
@@ -38,52 +35,53 @@ def accept_cookies(driver):
     print("Cookies geaccepteerd!")
 
 
-def scraper(url):
-    chrome_options = Options()
-
-    proxy_host = os.getenv('PROXY_HOST')
-    proxy_port = os.getenv('PROXY_PORT')
-    proxy_user = os.getenv('PROXY_USER')
-    proxy_pass = os.getenv('PROXY_PASS')
-
-    chrome_options.add_argument(f'--proxy-server={f"http://{proxy_user}:{proxy_pass}@{proxy_host}:{proxy_port}"}')
-
-    # Uncomment de volgende regel als u in headless modus wilt draaien
-    chrome_options.add_argument("--headless")
-
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.get(url)
-
-    # Accepteer cookies
-    accept_cookies(driver)
-
-    # Wacht tot de feed div is geladen
+def get_current_ip():
     try:
-        feed_div = WebDriverWait(driver, 2).until(
-            EC.presence_of_element_located((By.XPATH, "//div[@role='feed']"))
-        )
-    except TimeoutException:
-        print("Kon de feed div niet vinden")
-        driver.quit()
+        response = requests.get('https://api.ipify.org?format=json')
+        return response.json()['ip']
+    except:
+        return "Kon IP-adres niet ophalen"
+
+
+def scraper(url):
+    SBR_WEBDRIVER = os.getenv('SBR_WEBDRIVER')
+    print('Connecting to Scraping Browser...')
+    sbr_connection = ChromiumRemoteConnection(SBR_WEBDRIVER, 'goog', 'chrome')
+
+    driver = None
+    try:
+        driver = Remote(sbr_connection, options=ChromeOptions())
+        print('Connected! Navigating...')
+
+        wait = WebDriverWait(driver, 30)
+
+        driver.get(url)
+        print(f"Navigated to: {driver.current_url}")
+
+        accept_cookies(driver)
+        print("Cookies geaccepteerd!")
+
+        feed_div = wait.until(EC.presence_of_element_located((By.XPATH, "//div[@role='feed']")))
+        print("Feed div gevonden")
+
+        for i in range(10):
+            driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight;", feed_div)
+            time.sleep(2)
+            new_height = driver.execute_script("return arguments[0].scrollHeight;", feed_div)
+            print(f"Scroll poging {i + 1} voltooid")
+
+        html = driver.page_source
+        print(f"HTML opgehaald, lengte: {len(html)}")
+        return html
+    except Exception as e:
+        print(f"Fout tijdens scrapen: {e}")
         return None
-
-    # Scroll binnen de feed div
-    last_height = driver.execute_script("return arguments[0].scrollHeight;", feed_div)
-    while True:
-        # Scroll naar beneden binnen de feed div
-        driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight;", feed_div)
-
-        time.sleep(1)
-
-        new_height = driver.execute_script("return arguments[0].scrollHeight;", feed_div)
-        if new_height == last_height:
-            break
-        last_height = new_height
-
-    html = driver.page_source
-    driver.quit()
-    return html
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception as e:
+                print(f"Fout bij het afsluiten van de driver: {e}")
 
 
 def extract_body_content(html):
