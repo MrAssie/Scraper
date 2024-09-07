@@ -103,21 +103,42 @@ def insert_or_update_company_data(google_data, kvk_data):
     conn.close()
 
 
-def run_scraper(search_term):
+import streamlit as st
+import pandas as pd
+from time import sleep
+
+
+def run_scraper(search_term, show_status):
     create_table()
 
     # Google Places scraping
-    google_url = f"https://www.google.nl/maps/search/{search_term}/"
-    html = google_scraper(google_url)
-    place_ids = extract_place_ids(html)
+    if show_status:
+        with st.spinner('Google Maps zoekresultaten ophalen...'):
+            google_url = f"https://www.google.nl/maps/search/{search_term}/"
+            html = google_scraper(google_url)
+            place_ids = extract_place_ids(html)
+        st.success(f"{len(place_ids)} locaties gevonden op Google Maps.")
+    else:
+        google_url = f"https://www.google.nl/maps/search/{search_term}/"
+        html = google_scraper(google_url)
+        place_ids = extract_place_ids(html)
 
     progress_bar = st.progress(0)
+    if show_status:
+        status_text = st.empty()
+
     for i, place_id in enumerate(place_ids):
+        if show_status:
+            status_text.text(f"Verwerken van locatie {i + 1}/{len(place_ids)}")
+
         google_data = get_place_details(place_id)
+
         if google_data:
             google_data['place_id'] = place_id
+            if show_status:
+                st.info(f"Google data opgehaald voor: {google_data.get('name', 'Onbekende locatie')}")
 
-            # KvK scraping for each place
+            # KvK scraping voor elke locatie
             kvk_data = {}
             if 'name' in google_data:
                 kvk_url = "https://www.kvk.nl/zoeken/"
@@ -126,37 +147,63 @@ def run_scraper(search_term):
                     companies = extract_company_data(kvk_html)
                     if companies:
                         kvk_data = companies[0]
+                        if show_status:
+                            st.success(f"KvK gegevens gevonden voor {google_data['name']}")
+                    elif show_status:
+                        st.warning(f"Geen KvK gegevens gevonden voor {google_data['name']}")
+                elif show_status:
+                    st.error(f"Kon KvK gegevens niet ophalen voor {google_data['name']}")
 
-            # Combine and save the data
+            # Combineer en sla de data op
             insert_or_update_company_data(google_data, kvk_data)
+            if show_status:
+                st.success("Data opgeslagen in de database.")
 
-        # Update progress bar
+        # Update voortgangsbalk
         progress_bar.progress((i + 1) / len(place_ids))
+        sleep(0.1)  # Kleine vertraging voor vloeiende UI-updates
 
+    if show_status:
+        status_text.text("Verwerking voltooid!")
     st.success("Scraping en opslag voltooid.")
 
 
 def display_results():
-    conn = get_connection()
-    df = pd.read_sql_query("SELECT * FROM companies", conn)
-    conn.close()
-    st.dataframe(df)
+    with st.spinner('Resultaten ophalen uit de database...'):
+        conn = get_connection()
+        df = pd.read_sql_query("SELECT * FROM companies", conn)
+        conn.close()
+
+    if not df.empty:
+        st.success(f"{len(df)} bedrijven gevonden in de database.")
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("Geen resultaten gevonden in de database.")
 
 
 def main():
+    st.set_page_config(layout="wide")
     st.title("Google Places en KvK Scraper")
 
-    search_term = st.text_input("Voer een zoekterm in voor Google Maps:")
+    col1, col2 = st.columns([2, 1])
 
-    if st.button("Start Scraping"):
-        if search_term:
-            run_scraper(search_term)
+    with col1:
+        search_term = st.text_input("Voer een zoekterm in voor Google Maps:")
+        show_status = st.checkbox("Toon status updates", value=True)
+
+        if st.button("Start Scraping"):
+            if search_term:
+                run_scraper(search_term, show_status)
+            else:
+                st.warning("Voer eerst een zoekterm in.")
+
+    with col2:
+        if st.button("Toon Resultaten"):
             display_results()
-        else:
-            st.warning("Voer eerst een zoekterm in.")
 
-    if st.button("Toon Resultaten"):
-        display_results()
+    # Resultaten tabel onder de andere elementen
+    st.header("Resultaten")
+    display_results()
 
 
 if __name__ == "__main__":

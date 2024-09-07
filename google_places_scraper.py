@@ -10,6 +10,7 @@ from selenium.webdriver.chromium.remote_connection import ChromiumRemoteConnecti
 from selenium.common.exceptions import TimeoutException, WebDriverException
 import re
 from selenium.webdriver import Remote, ChromeOptions
+import streamlit as st
 load_dotenv()
 
 
@@ -43,7 +44,7 @@ def scraper(url):
     try:
         driver = Remote(sbr_connection, options=ChromeOptions())
 
-        wait = WebDriverWait(driver, 30)
+        wait = WebDriverWait(driver, 3)
 
         driver.get(url)
 
@@ -51,9 +52,9 @@ def scraper(url):
 
         feed_div = wait.until(EC.presence_of_element_located((By.XPATH, "//div[@role='feed']")))
 
-        for i in range(10):
+        for i in range(7):
             driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight;", feed_div)
-            time.sleep(2)
+            time.sleep(1)
             new_height = driver.execute_script("return arguments[0].scrollHeight;", feed_div)
             print(f"Scroll poging {i + 1} voltooid")
 
@@ -79,6 +80,10 @@ def extract_body_content(html):
 
 
 def extract_place_ids(html):
+    if not html:
+        st.warning("Geen zoekresultaten gevonden. Controleer je zoekopdracht en probeer het opnieuw.")
+        return []
+
     soup = BeautifulSoup(html, 'html.parser')
     place_ids = []
 
@@ -92,16 +97,30 @@ def extract_place_ids(html):
             place_id = match.group(1)
             place_ids.append(place_id)
 
+    if not place_ids:
+        st.warning("Geen locaties gevonden. Probeer een andere zoekopdracht.")
+
     return place_ids
 
 
 def get_place_details(place_id):
     google_api = os.getenv('GOOGLE_API_KEY')
+    if not google_api:
+        st.error("Google API-sleutel ontbreekt. Controleer je configuratie.")
+        return None
+
     url = f'https://maps.googleapis.com/maps/api/place/details/json?place_id={place_id}&fields=name,formatted_address,formatted_phone_number,website,rating,user_ratings_total,address_component,type&key={google_api}'
-    response = requests.get(url)
-    if response.status_code == 200:
-        return response.json().get('result')
-    return None
+
+    try:
+        response = requests.get(url, timeout=10)  # Voeg een timeout toe
+        response.raise_for_status()  # Raise een uitzondering voor HTTP-fouten
+        result = response.json().get('result')
+        if not result:
+            st.warning(f"Geen details gevonden voor een locatie (ID: {place_id})")
+        return result
+    except requests.exceptions.RequestException as e:
+        st.error(f"Er is een fout opgetreden bij het ophalen van locatiegegevens. Probeer het later opnieuw.")
+        return None
 
 
 if __name__ == "__main__":
