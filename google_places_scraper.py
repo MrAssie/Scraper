@@ -32,37 +32,24 @@ def accept_cookies(driver):
             )
 
     accept_button.click()
-    print("Cookies geaccepteerd!")
 
-
-def get_current_ip():
-    try:
-        response = requests.get('https://api.ipify.org?format=json')
-        return response.json()['ip']
-    except:
-        return "Kon IP-adres niet ophalen"
 
 
 def scraper(url):
     SBR_WEBDRIVER = os.getenv('SBR_WEBDRIVER')
-    print('Connecting to Scraping Browser...')
     sbr_connection = ChromiumRemoteConnection(SBR_WEBDRIVER, 'goog', 'chrome')
 
     driver = None
     try:
         driver = Remote(sbr_connection, options=ChromeOptions())
-        print('Connected! Navigating...')
 
         wait = WebDriverWait(driver, 30)
 
         driver.get(url)
-        print(f"Navigated to: {driver.current_url}")
 
         accept_cookies(driver)
-        print("Cookies geaccepteerd!")
 
         feed_div = wait.until(EC.presence_of_element_located((By.XPATH, "//div[@role='feed']")))
-        print("Feed div gevonden")
 
         for i in range(10):
             driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight;", feed_div)
@@ -71,7 +58,6 @@ def scraper(url):
             print(f"Scroll poging {i + 1} voltooid")
 
         html = driver.page_source
-        print(f"HTML opgehaald, lengte: {len(html)}")
         return html
     except Exception as e:
         print(f"Fout tijdens scrapen: {e}")

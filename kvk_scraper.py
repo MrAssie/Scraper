@@ -44,7 +44,6 @@ def handle_cookies(driver):
 
 def scraper(url, search_term):
     SBR_WEBDRIVER = os.getenv('SBR_WEBDRIVER')
-    print('Connecting to Scraping Browser...')
     sbr_connection = ChromiumRemoteConnection(SBR_WEBDRIVER, 'goog', 'chrome')
 
     chrome_options = ChromeOptions()
@@ -52,66 +51,33 @@ def scraper(url, search_term):
 
     try:
         with Remote(sbr_connection, options=chrome_options) as driver:
-            print('Connected! Navigating...')
-
             driver.get(url)
-            print(f"Navigated to: {driver.current_url}")
 
             # Handel cookies af
             handle_cookies(driver)
-            print("Cookies handled")
 
             # Wacht tot het zoekveld aanwezig is
             search_box = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder='Zoek in kvk.nl']"))
             )
-            print("Search box found")
 
-            # Wis eventuele bestaande tekst in het zoekveld
             search_box.clear()
 
-            # Vul de zoekopdracht in
             search_box.send_keys(search_term)
-            print(f"Entered search term: {search_term}")
 
-            # Zoek de zoekknop
-            try:
-                search_button = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR,
-                                                "button[class*='Button-module_generic-button'][class*='Button-module_primary']"))
-                )
-                print("Search button found")
-                driver.execute_script("arguments[0].click();", search_button)
-                print("Clicked search button via JavaScript")
-            except TimeoutException:
-                print("Search button not found or not clickable, trying alternative methods")
+            search_button = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR,
+                                            "button[class*='Button-module_generic-button'][class*='Button-module_primary']"))
+            )
 
-                # Methode 1: Druk op Enter
-                search_box.send_keys(Keys.RETURN)
-                print("Pressed Enter key")
+            driver.execute_script("arguments[0].click();", search_button)
 
-            # Wacht tot de URL verandert of er zoekresultaten verschijnen
-            start_time = time.time()
-            while time.time() - start_time < 10:  # Wacht maximaal 10 seconden
-                if driver.current_url != url:
-                    print("URL changed")
-                    break
-                try:
-                    driver.find_element(By.CSS_SELECTOR, "[data-ui-test-class='spa-global-search']")
-                    print("Search results container found")
-                    break
-                except NoSuchElementException:
-                    time.sleep(0.5)
-            else:
-                print("Timeout waiting for search results or URL change")
 
 
             # Wacht even om zeker te zijn dat alles is geladen
             time.sleep(2)
 
             html = driver.page_source
-            print(html)
-            print(f"HTML retrieved, length: {len(html)}")
             return html
 
     except TimeoutException:
